@@ -1,4 +1,4 @@
-# Flight Data Analysis Project
+# Formula 1 Data Analysis Project
 
 ## Overview
 
@@ -24,13 +24,16 @@ They interoperate as follows:
 
 ## Project architecture
 
-![Project architecture](https://github.com/user-attachments/assets/89bb8c1c-b0e1-42cf-9c7b-be1a3ee1968c)
+![Project architecture](ergast-architecture.png)
 
 
-## Database Schema (tables of interest)
+## Database Schema (fact and dimension tables)
 
-![Database schema](https://github.com/user-attachments/assets/8b5db099-1573-43d5-a60a-d76d73dd00cc)
+![Database schema](normalized_data.png)
 
+### dbt lineage
+
+![dbt lineage](dbt_lineage.png)
 
 ## Prerequisites
 
