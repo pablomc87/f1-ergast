@@ -1,0 +1,23 @@
+version: 2
+
+models:
+  - name: city_laps
+    description: "A model that aggregates the total laps run in each city, including latitude and longitude."
+    columns:
+      - name: locality
+        description: "Name of the city where the race circuit is located."
+        tests:
+          - not_null
+          - unique
+      - name: lat
+        description: "Latitude of the city where the race circuit is located."
+        tests:
+          - not_null
+      - name: long
+        description: "Longitude of the city where the race circuit is located."
+        tests:
+          - not_null
+      - name: total_laps
+        description: "Total number of laps run in races held in the city."
+        tests:
+          - not_null

@@ -1,0 +1,92 @@
+version: 2
+
+models:
+  - name: driver_race_numbers
+    description: "A model that assigns a race number to each driver's participation in races, indicating their order of participation."
+    columns:
+      - name: race_id
+        description: "The unique identifier for each race."
+        data_tests:
+          - not_null
+          - unique
+
+      - name: season
+        description: "The racing season in which the race occurred."
+        data_tests:
+          - not_null
+
+      - name: round
+        description: "The round number of the race within the season."
+        data_tests:
+          - not_null
+
+      - name: driver_str_id
+        description: "The unique identifier for each driver."
+        data_tests:
+          - not_null
+
+      - name: driver_name
+        description: "The full name of the driver (given name and family name)."
+        data_tests:
+          - not_null
+
+      - name: race_number
+        description: "The sequential number of the race for each driver, indicating their participation order."
+        data_tests:
+          - not_null
+          - unique
+
+      - name: points
+        description: "The points scored by the driver in the race."
+        data_tests:
+          - not_null
+
+  - name: driver_cumulative_points
+    description: "A model that calculates the cumulative points for each driver over their career, showing the evolution of accumulated points across the races they participated in."
+    depends_on:
+      - ref('driver_race_numbers')
+    columns:
+      - name: driver_str_id
+        description: "The unique identifier for each driver."
+        data_tests:
+          - not_null
+
+      - name: driver_name
+        description: "The full name of the driver (given name and family name)."
+        data_tests:
+          - not_null
+
+      - name: race_number
+        description: "The sequential number of the race for each driver, indicating their participation order."
+        data_tests:
+          - not_null
+
+      - name: cumulative_points
+        description: "The total accumulated points for the driver up to the specified race number."
+        data_tests:
+          - not_null
+
+  - name: driver_career_performance
+    description: "A model that tracks the cumulative performance of drivers over their career, showing the evolution of accumulated points across the races they participated in."
+    depends_on:
+      - ref('driver_cumulative_points')
+    columns:
+      - name: race_number
+        description: "The sequential number of the race for each driver, indicating their participation order."
+        data_tests:
+          - not_null
+
+      - name: driver_str_id
+        description: "The unique identifier for each driver."
+        data_tests:
+          - not_null
+
+      - name: driver_name
+        description: "The full name of the driver (given name and family name)."
+        data_tests:
+          - not_null
+
+      - name: cumulative_points
+        description: "The total accumulated points for the driver up to the specified race number."
+        data_tests:
+          - not_null

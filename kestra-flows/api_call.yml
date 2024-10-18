@@ -1,0 +1,227 @@
+id: ergast_api_call
+namespace: f1-data
+description: Calling the Ergast API to retrieve results of all races since 1950
+
+inputs:
+  - id: server_uri
+    type: URI
+    defaults: https://ergast.com/api/f1/2008/results.json
+
+tasks:
+  - id: server_check_request
+    type: io.kestra.plugin.core.flow.AllowFailure
+    tasks:
+      - id: http_request
+        type: io.kestra.plugin.core.http.Request
+        uri: "{{ inputs.server_uri }}"
+
+      - id: check_status
+        type: io.kestra.plugin.core.flow.If
+        condition: "{{ outputs.http_request.code != 200 }}"
+        then:
+          - id: unhealthy
+            type: io.kestra.plugin.core.log.Log
+            message: "Server is unhealthy! Response {{ outputs.http_request.body }}"
+        else:
+          - id: healthy
+            type: io.kestra.plugin.core.log.Log
+            message: Everything is fine!
+
+    errors:
+      - id: request_failed
+        type: io.kestra.plugin.core.log.Log
+        message: "The request {{ inputs.server_uri }} failed with status {{ outputs.http_request.code }}!"
+
+  - id: prepare_race_urls
+    type: io.kestra.plugin.scripts.shell.Script
+    outputFiles:
+      - urls.txt
+    script: |
+      for year in $(seq 1950 2024); do
+        echo "https://ergast.com/api/f1/${year}/races.json" >> urls.txt
+      done
+
+  - id: call_subsequent_api
+    type: io.kestra.plugin.core.flow.ForEach
+    values: "{{ 0..73 }}"
+    tasks:
+      - id: get_races_per_year
+        type: io.kestra.plugin.scripts.python.Script
+        description: This script calls the Ergast API for each year since 1950
+        warningOnStdErr: false
+        taskRunner:
+          type: io.kestra.plugin.core.runner.Process
+        script: |
+          import json
+          from kestra import Kestra
+          import requests
+          from time import sleep
+          
+          with open("{{ outputs.prepare_race_urls.outputFiles['urls.txt'] }}") as f:
+              urls = f.readlines()
+          url = urls[int("{{ taskrun.value }}")].strip()
+          response = requests.get(url)
+          data = response.json()
+          races_data = data['MRData']['RaceTable']['Races']
+          year = data["MRData"]["RaceTable"]["season"]
+          rounds = [element["round"] for element in data["MRData"]["RaceTable"]["Races"]]
+          Kestra.outputs({"year":year, "race_rounds":[race_round for race_round in rounds]})
+          sleep(3)
+        beforeCommands:
+          - pip install kestra requests
+
+      - id: return_year
+        type: io.kestra.plugin.core.debug.Return
+        format: "{{ outputs.get_races_per_year[taskrun.value].vars.year }}"
+
+      - id: get_results_per_race
+        type: io.kestra.plugin.core.flow.ForEach
+        values: "{{ outputs.get_races_per_year[taskrun.value].vars.race_rounds }}"
+        tasks:
+          - id: get_results
+            type: io.kestra.plugin.scripts.python.Script
+            description: This script calls the Ergast API to retrieve results for each race of each year
+            warningOnStdErr: false
+            outputFiles:
+              - race.json
+            taskRunner:
+              type: io.kestra.plugin.core.runner.Process
+            script: |
+              import json
+              from kestra import Kestra
+              import requests
+              from time import sleep
+              import uuid
+              import clickhouse_connect
+              from typing import List, Dict
+              
+              
+              # Race Table
+              def normalize_race(data):
+                  race_data = {
+                      'race_id': data['date'] + '_' + data['raceName'],
+                      'season': int(data['season']),
+                      'round': int(data['round']),
+                      'race_name': data['raceName'],
+                      'date': data['date'],
+                      'url': data['url']
+                  }
+                  return race_data
+              
+              
+              # Circuit Table
+              def normalize_circuit(circuit_data):
+                  circuit = {
+                      'circuit_str_id': circuit_data['circuitId'],
+                      'circuit_name': circuit_data['circuitName'],
+                      'locality': circuit_data['Location']['locality'],
+                      'country': circuit_data['Location']['country'],
+                      'lat': float(circuit_data['Location']['lat']),
+                      'long': float(circuit_data['Location']['long']),
+                      'url': circuit_data['url']
+                  }
+                  return circuit
+              
+              
+              # Driver Table
+              def normalize_driver(driver_data) -> Dict:
+                  driver = {
+                      'driver_str_id': driver_data['driverId'],
+                      'given_name': driver_data['givenName'],
+                      'family_name': driver_data['familyName'],
+                      'date_of_birth': driver_data['dateOfBirth'],
+                      'nationality': driver_data['nationality'],
+                      'url': driver_data['url']
+                  }
+                  return driver
+              
+              
+              # Constructor Table
+              def normalize_constructor(constructor_data):
+                  constructor = {
+                      'constructor_str_id': constructor_data['constructorId'],
+                      'name': constructor_data['name'],
+                      'nationality': constructor_data['nationality'],
+                      'url': constructor_data['url']
+                  }
+                  return constructor
+              
+              
+              # Results Table
+              def normalize_result(result_data, race_id, circuit_str_id):
+                  result = {
+                      'result_id': race_id + '_' + result_data['Driver']['driverId'],
+                      'race_id': race_id,  # Use the race ID passed as a parameter
+                      'driver_str_id': result_data['Driver']['driverId'],
+                      'circuit_str_id': circuit_str_id,
+                      'constructor_str_id': result_data['Constructor']['constructorId'],
+                      'position': int(result_data['position']),
+                      'position_text': result_data['positionText'],
+                      'points': float(result_data['points']),
+                      'grid': int(result_data['grid']),
+                      'laps': int(result_data['laps']),
+                      'status': result_data['status'],
+                      'time_millis': int(result_data['Time']['millis']) if 'Time' in result_data else None,
+                      'time': result_data['Time']['time'] if 'Time' in result_data else None,
+                      'number': result_data['number']
+                  }
+                  return result
+              
+              
+              def insert_into_table(table_name, id_column, values: List[Dict], client):
+                  # Extract columns from the first dictionary
+                  columns = values[0].keys()
+              
+                  # Construct the placeholders for the query based on the columns
+                  placeholders = ', '.join([f'%({col})s' for col in columns])
+                  # Prepare the query for insertion
+                  insert_query = f"INSERT INTO {table_name} ({', '.join(columns)}) VALUES ({placeholders})"
+              
+                  for value in values:
+                      # Check if the record already exists
+                      exists_query = f"SELECT 1 FROM {table_name} WHERE {id_column} = %({id_column})s LIMIT 1"
+                      result = client.command(exists_query, value)
+              
+                      if result!=1:  # If the record does not exist, insert it
+                          client.command(insert_query, value)
+                      else:
+                          print(f"Record with {id_column} = {value[id_column]} already exists in {table_name}, skipping insertion.")
+              
+              
+              url = "https://ergast.com/api/f1/" + "{{ outputs.return_year[parent.taskrun.value].value }}" + "/" + "{{ taskrun.value }}" + "/results.json"
+              response = requests.get(url)
+              data = response.json()
+              races = data["MRData"]["RaceTable"]["Races"]
+              sleep(4)
+              for race in races:
+                  # Now, let's extract all the normalized data
+                  race_normalized = [normalize_race(race)]
+                  circuit_normalized = [normalize_circuit(race['Circuit'])]
+              
+                  # Results, drivers, constructors from the race results
+                  results_normalized = []
+                  drivers_normalized = []
+                  constructors_normalized = []
+              
+                  for result in race['Results']:
+                      # Normalize results
+                      result_normalized = normalize_result(result, race_normalized[0]["race_id"], circuit_normalized[0]["circuit_str_id"])
+                      results_normalized.append(result_normalized)
+              
+                      # Normalize drivers
+                      driver_normalized = normalize_driver(result['Driver'])
+                      drivers_normalized.append(driver_normalized)
+              
+                      # Normalize constructors
+                      constructor_normalized = normalize_constructor(result['Constructor'])
+                      constructors_normalized.append(constructor_normalized)
+              
+                  client = clickhouse_connect.get_client(host='clickhouse', port=8123, username='default', password='')
+                  insert_into_table('races', 'race_id', race_normalized, client)
+                  insert_into_table('circuits', 'circuit_str_id', circuit_normalized, client)
+                  insert_into_table('results', 'result_id', results_normalized, client)
+                  insert_into_table('drivers', 'driver_str_id', drivers_normalized, client)
+                  insert_into_table('constructors', 'constructor_str_id', constructors_normalized, client)
+
+            beforeCommands:
+              - pip install kestra requests clickhouse-connect

@@ -1,0 +1,17 @@
+version: 2
+
+sources:
+  - name: f1_ergast_api
+    database: clickhouse
+    schema: default        # replace with the schema name where the table exists
+    tables:
+      - name: races
+        description: "Table containing race information"
+      - name: results
+        description: "Table containing race results"
+      - name: drivers
+        description: "Table containing driver information"
+      - name: constructors
+        description: "Table containing constructor information"
+      - name: circuits
+        description: "Table containing circuit information"
