@@ -34,6 +34,7 @@ They interoperate as follows:
 
 ## Prerequisites
 
+- Python and pip
 - dbt (installed via pip, preferably in a virtual environment)
 - Docker and Docker Compose
 
@@ -47,7 +48,7 @@ They interoperate as follows:
 
 2. **Create a virtual environment** (optional):
     ```sh
-    python3.12 -m venv .venv
+    python -m venv .venv
     source .venv/bin/activate
     ```
 
@@ -55,27 +56,6 @@ They interoperate as follows:
     ```sh
     pip install -r requirements.txt
     ```
-
-4. **Set up environment variables**:
-   - Create a `.env` file in the project root directory.
-      You can do so by running the following command:
-      ```sh
-      echo -e "AIRFLOW_UID=$(id -u)" > .env
-      ```
-   - Add the following environment variables to the `.env` file:
-     ```sh
-     POSTGRES_DB=airflow
-     POSTGRES_USER=airflow
-     POSTGRES_PASSWORD=airflow
-     POSTGRES_PORT=5432
-     POSTGRES_HOST=postgres
-     AIRFLOW_PROJ_DIR=./data_ingestion/airflow
-     MB_DB_DBNAME=metabase
-     MB_DB_PORT=5432
-     MB_DB_USER=metabase
-     MB_DB_PASS=metabase
-     ```
-   These environment variables should be changed in a production environment, especially the database credentials, but for now the project works using these variables that have been set also in the metabase instance to connect to the postgres database.
 
 ## Usage
 
@@ -86,150 +66,82 @@ They interoperate as follows:
     docker-compose up --build -d
     ```
    When the setup has ended, the following services should be running:
-    - PostgreSQL database for airflow and storing data.
-    - Airflow services: webserver, scheduler, triggerer, and worker.
-    - Metabase instance with its own database.
-    - Kafka service for streaming flight data. It includes a broker, a producer, and a consumer.
-    - Redis service for Celery task queue.
+    - PostgreSQL database for metabase data.
+    - ClickHouse database for storing the normalized and analytics data.
+    - Metabase service for data visualization.
+    - Postgres database for Kestra.
    
-2. **Access the Airflow web interface**:
-    - Open the Airflow web interface at `http://localhost:8080`. It might take some time until it is completely up and running.
-    - Log in with user airflow and password airflow. This login process will need to change in production environment.
+2. **Access the Kestra web interface**:
+    - Open the Kestra web interface at `http://localhost:8080`.
+    - Go to the Flows section and start the `f1-data.ergast_api_call` flow.
 
-3. **Trigger DAGs**:
-    - You can start all dags.
-
-4. **Run metabase restore dump**:
+3. **Run metabase restore dump**:
     - Run the following command to create a backup of the metabase database:
     ```sh
-    ./data_storage/restore_metabase.sh
+    ./metabase/restore_metabase.sh
     ```
-    - The backup will be stored in the `data_storage/` directory.
+    - You can backup the information again by running
+    ```sh
+    ./metabase/backup_metabase.sh
+    ```
+    - The backup will be stored in the `metabase/` directory.
     - If the file doesn't run, you might have to make it executable by running:
     ```sh
-    sudo chmod +x data_storage/restore_metabase.sh
+    sudo chmod +x metabase/restore_metabase.sh
+    ```
+
+4. **Run dbt models**:
+    - Go to the folder `dbt/f1_ergast_api` with the terminal.
+   ```sh
+    cd dbt/f1_ergast_api
+    ```
+    - Run the following command to run the dbt models:
+    ```sh
+    dbt run
+    ```
+    - You can also test the models by running:
+    ```sh
+    dbt test
     ```
 
 5. **Access the Metabase web interface**:
     - Open the Metabase web interface at `http://localhost:3000`.
     - Log the credentials I have provided you in my email.
-    - You could go to Admin, Databases, and sync the FlightRadarDB database so the dashboards contain the appropriate data.
+    - You could go to Admin, Databases, and sync the ClickHouse database so the dashboards contain the appropriate data.
     - You can check the dashboard I have created for you.
-
-## Fault Tolerance
-
-In this project, fault tolerance is key to ensuring data flow continuity between the FlightRadar24 API, Kafka, and PostgreSQL. The following mechanisms and recommendations provide resilience against potential failures at various stages of the pipeline.
-
-1. Kafka Fault Tolerance
-
-Although our current implementation doesn’t fully utilize Kafka’s built-in fault-tolerance features, here are key Kafka functionalities that should be configured for a production-ready system:
-
-- Replication: Kafka ensures data availability by replicating topics across multiple brokers. In a production environment, setting an appropriate replication factor (e.g., 3) will ensure data redundancy and availability even if a broker fails.
-- Acknowledgments (acks): Producers can be configured to wait for acknowledgments that guarantee the data is successfully written and replicated across brokers. Use acks=all in production to ensure message delivery is confirmed only when it’s written to all in-sync replicas.
-- Consumer Group Rebalancing: Kafka allows consumers within a group to take over message processing from another consumer if it fails. This ensures that the pipeline remains operational even when some consumers go offline. Our consumer should be part of a group, ensuring that consumer failure doesn’t stop message processing.
-
-2. Application-Level Fault Tolerance
-
-- Retries with Backoff: The producer implements retry logic with exponential backoff for fetching data from the FlightRadar24 API. If the API request fails (e.g., due to rate-limiting or temporary unavailability), the system waits and retries multiple times before giving up. This ensures that transient issues do not disrupt the data pipeline.
-```python
-retries = 5
-backoff_factor = 2
-```
-We could modify our retry logic to include a more sophisticated backoff strategy, or just giving up for a specific flight. This would prevent the system from getting stuck in a loop trying to fetch a flight that is not available.
-
-- Consumer Polling and Retrying: The Kafka consumer polls for new messages and retries if no messages are found within a set time. If the consumer encounters a message processing error, it will retry until successful or reach the retry limit. This reduces the likelihood of lost or missed data.
-
-```python
-attempts = 0
-max_attempts = 10
-```
-
-### Database Fault Tolerance
-
-- Transaction Management: Inserts into PostgreSQL are wrapped in transactions. If an error occurs during data insertion, the transaction is rolled back, ensuring data consistency and preventing partial writes.
-
-### Airflow Fault Tolerance
-- DAG Retries: Airflow DAGs are configured to run regularly, more often than needed by the project. We haven't set up any retry mechanism because we feel that it is pretty robust, but it could be added if needed. With appropriate hooks and operators, we could configure Airflow alerts to notify administrators if a task failed (`SlackNotifier`, `airflow.utils.email.send_email_smtp`).
-
-### Logging and Monitoring
-- Logging: Comprehensive logging is in place for both producers and consumers, including message errors, and retries. Delivery reports weren't implemented because it made it harder to read the logs. These logs can help diagnose issues quickly and provide insight into the system’s operational health. Right now they're accessible via the `docker compose logs` command.
-In a production environment, it would be appropriate to integrate with centralized logging platforms (e.g., ELK, Datadog) for easier monitoring and analysis.
-
-By combining Kafka's fault-tolerance mechanisms (such as replication and consumer rebalancing) with robust retry logic in the producer and consumer, our pipeline is designed to gracefully handle failures.
-
-## Production Deployment
-
-### Why Not Deployed in Production
-
-The project is not deployed in production mainly due to cost considerations. Running a production-grade setup with continuous data ingestion, processing, and storage can incur significant costs, especially with cloud services.
-
-### Steps for Production Deployment
-
-1. **Cloud Infrastructure**: 
-   1. Set up a GCP project.
-   2. Deploy Airflow on Google Cloud Composer.
-   3. You could use Google Cloud SQL for PostgreSQL for the airflow and metabase databases. You could also have an additional database for the data, if the current structure doesn't fit your requirements.
-   4. Use Google Cloud Managed Service for Apache Kafka for streaming flight data. It will allow to replicate the current setup with several brokers, producers, and consumers for fault-tolerance and scalability.
-   5. Use Google Cloud Storage for storing data. It will also be used to store dag files.
-   6. Use a virtual machine for running the Metabase instance. You could use a marketplace instance too.
-   You could streamline the creation of this infrastructure using Terraform.
-   A Cloud infrastructure would allow for more scalability and reliability, also ensuring for more control over the environment and the permissions.
-
-#### Suggested Architecture
-
-![Suggested Architecture](https://github.com/user-attachments/assets/8fbc1d4c-90c2-4d46-91bd-6a1877cbdf8f)
 
 
 ### Next steps
 
-1. **CI/CD Pipeline**:
+1. **Improvement of sensitive variables handling**:
+    - The sensitive variables are currently hardcoded in the Kestra flows and dbt profiles. It would be better to use environment variables or a secrets management tool to store and retrieve these variables securely, in a production environment.
+   
+2. **CI/CD Pipeline**:
    1. Set up a CI/CD pipeline using Jenkins, GitLab CI/CD, or GitHub Actions.
    2. The pipeline should include steps for linting, testing, building, and deploying the project.
    3. The pipeline should be triggered on every push to the main branch.
    4. More reduced, focused pipelines could be created for development branches.
    5. The pipeline should include steps for deploying the project to the production environment, or you could do that locally with Terraform.
 
-2. **Comprehensive testing**:
-   1. Implement unit tests, integration tests, and end-to-end tests for the project.
-   2. Use tools like Pytest, KafkaUnit, and Postman for testing
+3. **Comprehensive testing**:
+   1. Implement unit tests, integration tests, and more thorough data tests for the project.
 
-3. **Security**:
+4. **Security**:
    1. Implement security best practices for the project, including encryption, access control, and data protection.
    2. Use secrets management tools like HashiCorp Vault or AWS Secrets Manager to store sensitive information.
-   3. Implement role-based access control (RBAC) for Airflow and Metabase.
+   3. Implement role-based access control (RBAC) for Kestra and Metabase.
 
-4. **Monitoring and Alerting**:
+5. **Monitoring and Alerting**:
    1. Set up monitoring and alerting for the project using tools like Prometheus, Grafana, and ELK Stack.
    2. Monitor key metrics such as data ingestion rate, latency, and error rates.
    3. Set up alerts for critical issues such as data pipeline failures or database outages.
 
-5. **Improved dashboards**:
-    1. Create more detailed and interactive dashboards in Metabase for visualizing flight data.
-    2. Include additional metrics, charts, and filters to provide deeper insights into the data.
-    3. Use Metabase's dashboard sharing feature to share dashboards with stakeholders.
-
-6. **Data Quality Checks**:
-    1. Implement data quality checks in Airflow to ensure the integrity of the data.
-    2. Perform checks such as data completeness, schema validation, and data accuracy.
-    3. Set up alerts for data quality issues and automate data validation processes.
-
 ## Project Choices and Explanations
 
-### Airport Continents Script
-
-A specific script was created to retrieve airport continents because the original dataset did not include this information. This script maps countries to their respective continents, ensuring accurate data analysis.
-
-### Top 3 Aircraft Models per Country
-
-For the query "Pour chaque pays de compagnie aérienne, le top 3 des modèles d'avion en usage", an SQL script was written to rank aircraft models by flight count within each country and select the top 3 models. This ensures that the most frequently used aircraft models are identified for each country.
-
-## Acknowledgements
-
-- FlightRadar24 for providing the API for flight data.
-- Apache Airflow for workflow orchestration.
-- PostgreSQL for database management.
-- avcodes for airline codes and information on their countries.
-- Exalt for providing me with the opportunity to work on this project.
+### ClickHouse instead of Neon Postgres
+Because of being more familiar with ClickHouse than Neon, I decided to go with ClickHouse since it provided also good performance for analytical queries since it is an OLAP database.
+### Metabase instead of Rill
+I chose Metabase because it is more user-friendly and easier to set up than Rill, especially considering that I didn't know Rill beforehand. It also provides a sufficient range of visualization options and dashboards that can be easily shared with other users.
 
 ## Contact
 
