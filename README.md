@@ -112,6 +112,7 @@ They interoperate as follows:
     - Log the credentials I have provided you in my email.
     - You could go to Admin, Databases, and sync the ClickHouse database so the dashboards contain the appropriate data.
     - You can check the dashboard I have created for you. `http://localhost:3000/dashboard/1-f1-data`
+    - The data in the dashboard will update as the Kestra flow runs since dbt models are materialized views.
 
 
 ### Next steps
