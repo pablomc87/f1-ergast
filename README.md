@@ -111,33 +111,43 @@ They interoperate as follows:
     - Open the Metabase web interface at `http://localhost:3000`.
     - Log the credentials I have provided you in my email.
     - You could go to Admin, Databases, and sync the ClickHouse database so the dashboards contain the appropriate data.
-    - You can check the dashboard I have created for you.
+    - You can check the dashboard I have created for you. `http://localhost:3000/dashboard/1-f1-data`
 
 
 ### Next steps
 
-1. **Improvement of sensitive variables handling**:
+1. **Simplifying Kestra flows**:
+    - The flows could be refactored to make them more modular and easier to maintain, especially the Python scripts.
+    - The flows could be optimized for performance by reducing unnecessary steps and improving data processing efficiency.
+
+2. **Adding Kestra flow with triggers to load new dbt models**:
+   - A new flow could be created to trigger the dbt models after the data ingestion flow has completed.
+
+3. **Adding more dbt models**:
+    - More dbt models could be added to transform the raw data into additional tables for analysis.
+    - The existing models could be optimized for performance and efficiency.
+4. **Improvement of sensitive variables handling**:
     - The sensitive variables are currently hardcoded in the Kestra flows and dbt profiles. It would be better to use environment variables or a secrets management tool to store and retrieve these variables securely, in a production environment.
    
-2. **CI/CD Pipeline**:
-   1. Set up a CI/CD pipeline using Jenkins, GitLab CI/CD, or GitHub Actions.
-   2. The pipeline should include steps for linting, testing, building, and deploying the project.
-   3. The pipeline should be triggered on every push to the main branch.
-   4. More reduced, focused pipelines could be created for development branches.
-   5. The pipeline should include steps for deploying the project to the production environment, or you could do that locally with Terraform.
+5. **CI/CD Pipeline**:
+   - Set up a CI/CD pipeline using Jenkins, GitLab CI/CD, or GitHub Actions.
+   - The pipeline should include steps for linting, testing, building, and deploying the project.
+   - The pipeline should be triggered on every push to the main branch.
+   - More reduced, focused pipelines could be created for development branches.
+   - The pipeline should include steps for deploying the project to the production environment, or you could do that locally with Terraform.
 
-3. **Comprehensive testing**:
-   1. Implement unit tests, integration tests, and more thorough data tests for the project.
+6. **Comprehensive testing**:
+   - Implement unit tests, integration tests, and more thorough data tests for the project.
 
-4. **Security**:
-   1. Implement security best practices for the project, including encryption, access control, and data protection.
-   2. Use secrets management tools like HashiCorp Vault or AWS Secrets Manager to store sensitive information.
-   3. Implement role-based access control (RBAC) for Kestra and Metabase.
+7. **Security**:
+   - Implement security best practices for the project, including encryption, access control, and data protection.
+   - Use secrets management tools like HashiCorp Vault or AWS Secrets Manager to store sensitive information.
+   - Implement role-based access control (RBAC) for Kestra and Metabase.
 
-5. **Monitoring and Alerting**:
-   1. Set up monitoring and alerting for the project using tools like Prometheus, Grafana, and ELK Stack.
-   2. Monitor key metrics such as data ingestion rate, latency, and error rates.
-   3. Set up alerts for critical issues such as data pipeline failures or database outages.
+8. **Monitoring and Alerting**:
+   - Set up monitoring and alerting for the project using tools like Prometheus, Grafana, and ELK Stack.
+   - Monitor key metrics such as data ingestion rate, latency, and error rates.
+   - Set up alerts for critical issues such as data pipeline failures or database outages.
 
 ## Project Choices and Explanations
 
